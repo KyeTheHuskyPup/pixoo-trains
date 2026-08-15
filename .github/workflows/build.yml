@@ -1,0 +1,474 @@
+name: Setup and Build Pixoo APK
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Generate Complete Android Project Structure
+        run: |
+          mkdir -p app/src/main/java/com/example/pixootrains
+          mkdir -p app/src/main/res/layout
+          mkdir -p app/src/main/res/values
+
+          # 1. settings.gradle.kts
+          cat << 'EOF' > settings.gradle.kts
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "pixoo-trains"
+          include(":app")
+          EOF
+
+          # 2. root build.gradle.kts
+          cat << 'EOF' > build.gradle.kts
+          plugins {
+              id("com.android.application") version "8.4.0" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.23" apply false
+          }
+          EOF
+
+          # 3. app/build.gradle.kts
+          cat << 'EOF' > app/build.gradle.kts
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+
+          android {
+              namespace = "com.example.pixootrains"
+              compileSdk = 34
+
+              defaultConfig {
+                  applicationId = "com.example.pixootrains"
+                  minSdk = 26
+                  targetSdk = 34
+                  versionCode = 1
+                  versionName = "1.0"
+              }
+
+              buildTypes {
+                  release {
+                      isMinifyEnabled = false
+                  }
+              }
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          }
+
+          dependencies {
+              implementation("androidx.core:core-ktx:1.13.1")
+              implementation("androidx.appcompat:appcompat:1.6.1")
+              implementation("com.google.android.material:material:1.12.0")
+              implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
+          }
+          EOF
+
+          # 4. AndroidManifest.xml
+          cat << 'EOF' > app/src/main/AndroidManifest.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.BLUETOOTH" />
+              <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+              <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+              <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+
+              <application
+                  android:allowBackup="true"
+                  android:label="Pixoo Trains"
+                  android:theme="@style/Theme.MaterialComponents.DayNight.DarkActionBar">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          # 5. activity_main.xml
+          cat << 'EOF' > app/src/main/res/layout/activity_main.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:orientation="vertical"
+              android:padding="20dp">
+
+              <TextView
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:text="Pixoo Departure Board"
+                  android:textSize="22sp"
+                  android:textStyle="bold" />
+
+              <TextView
+                  android:id="@+id/tvStatus"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:layout_marginTop="8dp"
+                  android:text="Status: Disconnected"
+                  android:textColor="#D32F2F" />
+
+              <Spinner
+                  android:id="@+id/spDevices"
+                  android:layout_width="match_parent"
+                  android:layout_height="50dp"
+                  android:layout_marginTop="16dp" />
+
+              <com.google.android.material.textfield.TextInputLayout
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:layout_marginTop="12dp">
+                  <com.google.android.material.textfield.TextInputEditText
+                      android:id="@+id/etStationCode"
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:hint="Station Code (e.g. NCL / KGX / MAN)"
+                      android:text="NCL" />
+              </com.google.android.material.textfield.TextInputLayout>
+
+              <Button
+                  android:id="@+id/btnToggleFeed"
+                  android:layout_width="match_parent"
+                  android:layout_height="60dp"
+                  android:layout_marginTop="20dp"
+                  android:text="Connect &amp; Start Board" />
+          </LinearLayout>
+          EOF
+
+          # 6. DivoomManager.kt
+          cat << 'EOF' > app/src/main/java/com/example/pixootrains/DivoomManager.kt
+          package com.example.pixootrains
+
+          import android.annotation.SuppressLint
+          import android.bluetooth.BluetoothDevice
+          import android.bluetooth.BluetoothSocket
+          import android.graphics.Bitmap
+          import android.graphics.Color
+          import java.io.OutputStream
+          import java.util.UUID
+
+          class DivoomManager {
+              private val SPP_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
+              private var socket: BluetoothSocket? = null
+              private var outputStream: OutputStream? = null
+
+              @SuppressLint("MissingPermission")
+              fun connect(device: BluetoothDevice): Boolean {
+                  return try {
+                      disconnect()
+                      socket = device.createRfcommSocketToServiceRecord(SPP_UUID)
+                      socket?.connect()
+                      outputStream = socket?.outputStream
+                      true
+                  } catch (e: Exception) {
+                      disconnect()
+                      false
+                  }
+              }
+
+              fun isConnected(): Boolean = socket?.isConnected == true
+
+              fun disconnect() {
+                  try {
+                      outputStream?.close()
+                      socket?.close()
+                  } catch (_: Exception) {}
+                  outputStream = null
+                  socket = null
+              }
+
+              fun sendBitmap16x16(bitmap: Bitmap) {
+                  val scaled = Bitmap.createScaledBitmap(bitmap, 16, 16, false)
+                  val pixelData = ArrayList<Byte>()
+
+                  for (y in 0 until 16) {
+                      for (x in 0 until 16) {
+                          val pixel = scaled.getPixel(x, y)
+                          pixelData.add(Color.red(pixel).toByte())
+                          pixelData.add(Color.green(pixel).toByte())
+                          pixelData.add(Color.blue(pixel).toByte())
+                      }
+                  }
+
+                  val cmd = 0x44.toByte()
+                  val prefix = byteArrayOf(0x00, 0x0A, 0x0A, 0x04)
+                  val payload = prefix + pixelData.toByteArray()
+
+                  val length = payload.size + 3
+                  val lenL = (length and 0xFF).toByte()
+                  val lenH = ((length shr 8) and 0xFF).toByte()
+
+                  var sum = (cmd.toInt() and 0xFF) + (lenL.toInt() and 0xFF) + (lenH.toInt() and 0xFF)
+                  for (b in payload) {
+                      sum += (b.toInt() and 0xFF)
+                  }
+                  val checkL = (sum and 0xFF).toByte()
+                  val checkH = ((sum shr 8) and 0xFF).toByte()
+
+                  val packet = byteArrayOf(0x01, lenL, lenH, cmd) + payload + byteArrayOf(checkL, checkH, 0x02)
+
+                  outputStream?.write(packet)
+                  outputStream?.flush()
+              }
+          }
+          EOF
+
+          # 7. FrameRenderer.kt
+          cat << 'EOF' > app/src/main/java/com/example/pixootrains/FrameRenderer.kt
+          package com.example.pixootrains
+
+          import android.graphics.Bitmap
+          import android.graphics.Canvas
+          import android.graphics.Color
+          import android.graphics.Paint
+          import android.graphics.Rect
+
+          data class TrainInfo(
+              val destination: String,
+              val depTime: String,
+              val platform: String,
+              val onTime: Boolean
+          )
+
+          object FrameRenderer {
+              private val COLOR_AMBER = Color.rgb(255, 160, 0)
+              private val COLOR_GREEN = Color.rgb(0, 255, 60)
+              private val COLOR_RED = Color.rgb(255, 40, 40)
+              private val COLOR_WHITE = Color.WHITE
+
+              fun drawDestinationFrame(info: TrainInfo): Bitmap {
+                  val bitmap = Bitmap.createBitmap(16, 16, Bitmap.Config.ARGB_8888)
+                  val canvas = Canvas(bitmap)
+                  canvas.drawColor(Color.BLACK)
+
+                  val paint = Paint().apply { isAntiAlias = false }
+
+                  paint.color = COLOR_AMBER
+                  canvas.drawRect(Rect(1, 2, 6, 8), paint)
+                  paint.color = Color.BLACK
+                  canvas.drawRect(Rect(2, 3, 5, 5), paint)
+
+                  paint.color = COLOR_WHITE
+                  canvas.drawPoint(2f, 6f, paint)
+                  canvas.drawPoint(4f, 6f, paint)
+
+                  paint.color = COLOR_AMBER
+                  paint.textSize = 7f
+                  val dest = if (info.destination.length > 3) info.destination.take(3) else info.destination
+                  canvas.drawText(dest, 7f, 7f, paint)
+
+                  paint.color = if (info.onTime) COLOR_GREEN else COLOR_RED
+                  canvas.drawLine(1f, 13f, 14f, 13f, paint)
+
+                  return bitmap
+              }
+
+              fun drawTimePlatformFrame(info: TrainInfo): Bitmap {
+                  val bitmap = Bitmap.createBitmap(16, 16, Bitmap.Config.ARGB_8888)
+                  val canvas = Canvas(bitmap)
+                  canvas.drawColor(Color.BLACK)
+
+                  val paint = Paint().apply {
+                      isAntiAlias = false
+                      textSize = 6f
+                      color = COLOR_AMBER
+                  }
+                  canvas.drawText(info.depTime, 1f, 6f, paint)
+
+                  paint.color = COLOR_WHITE
+                  canvas.drawText("P${info.platform}", 1f, 14f, paint)
+
+                  return bitmap
+              }
+          }
+          EOF
+
+          # 8. MainActivity.kt
+          cat << 'EOF' > app/src/main/java/com/example/pixootrains/MainActivity.kt
+          package com.example.pixootrains
+
+          import android.Manifest
+          import android.annotation.SuppressLint
+          import android.bluetooth.BluetoothAdapter
+          import android.bluetooth.BluetoothDevice
+          import android.bluetooth.BluetoothManager
+          import android.content.pm.PackageManager
+          import android.os.Build
+          import android.os.Bundle
+          import android.widget.*
+          import androidx.appcompat.app.AppCompatActivity
+          import androidx.core.app.ActivityCompat
+          import kotlinx.coroutines.*
+
+          class MainActivity : AppCompatActivity() {
+              private val divoom = DivoomManager()
+              private var job: Job? = null
+              private val scope = CoroutineScope(Dispatchers.Main + Job())
+
+              private lateinit var tvStatus: TextView
+              private lateinit var spDevices: Spinner
+              private lateinit var etStationCode: EditText
+              private lateinit var btnToggle: Button
+
+              private val pairedDevices = mutableListOf<BluetoothDevice>()
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  setContentView(R.layout.activity_main)
+
+                  tvStatus = findViewById(R.id.tvStatus)
+                  spDevices = findViewById(R.id.spDevices)
+                  etStationCode = findViewById(R.id.etStationCode)
+                  btnToggle = findViewById(R.id.btnToggleFeed)
+
+                  checkPermissions()
+                  loadPairedDevices()
+
+                  btnToggle.setOnClickListener {
+                      if (job?.isActive == true) {
+                          stopFeed()
+                      } else {
+                          startFeed()
+                      }
+                  }
+              }
+
+              @SuppressLint("MissingPermission")
+              private fun loadPairedDevices() {
+                  val bluetoothManager = getSystemService(BLUETOOTH_SERVICE) as BluetoothManager
+                  val adapter: BluetoothAdapter? = bluetoothManager.adapter
+                  pairedDevices.clear()
+
+                  val deviceNames = mutableListOf<String>()
+                  adapter?.bondedDevices?.forEach { device ->
+                      pairedDevices.add(device)
+                      deviceNames.add("${device.name ?: "Unknown"} (${device.address})")
+                  }
+
+                  val spinnerAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, deviceNames)
+                  spDevices.adapter = spinnerAdapter
+              }
+
+              private fun startFeed() {
+                  if (spDevices.selectedItemPosition < 0 || pairedDevices.isEmpty()) {
+                      Toast.makeText(this, "No paired device selected", Toast.LENGTH_SHORT).show()
+                      return
+                  }
+
+                  val device = pairedDevices[spDevices.selectedItemPosition]
+                  val station = etStationCode.text.toString().trim()
+
+                  tvStatus.text = "Status: Connecting..."
+                  btnToggle.text = "Stop Board"
+
+                  job = scope.launch(Dispatchers.IO) {
+                      val connected = divoom.connect(device)
+                      withContext(Dispatchers.Main) {
+                          if (!connected) {
+                              tvStatus.text = "Status: Connection Failed"
+                              btnToggle.text = "Connect & Start Board"
+                              return@withContext
+                          }
+                          tvStatus.text = "Status: Live on ${device.name}"
+                      }
+
+                      var train = fetchDepartures(station)
+                      var lastFetch = System.currentTimeMillis()
+
+                      while (isActive && divoom.isConnected()) {
+                          if (System.currentTimeMillis() - lastFetch > 45_000) {
+                              train = fetchDepartures(station)
+                              lastFetch = System.currentTimeMillis()
+                          }
+
+                          divoom.sendBitmap16x16(FrameRenderer.drawDestinationFrame(train))
+                          delay(3500)
+
+                          divoom.sendBitmap16x16(FrameRenderer.drawTimePlatformFrame(train))
+                          delay(3500)
+                      }
+                  }
+              }
+
+              private fun stopFeed() {
+                  job?.cancel()
+                  divoom.disconnect()
+                  tvStatus.text = "Status: Stopped"
+                  btnToggle.text = "Connect & Start Board"
+              }
+
+              private fun fetchDepartures(stationCode: String): TrainInfo {
+                  return TrainInfo(
+                      destination = if (stationCode.isBlank()) "NCL" else stationCode.uppercase(),
+                      depTime = "14:35",
+                      platform = "2",
+                      onTime = true
+                  )
+              }
+
+              private fun checkPermissions() {
+                  val permissions = mutableListOf<String>()
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                      permissions.add(Manifest.permission.BLUETOOTH_CONNECT)
+                      permissions.add(Manifest.permission.BLUETOOTH_SCAN)
+                  }
+                  if (permissions.isNotEmpty()) {
+                      ActivityCompat.requestPermissions(this, permissions.toTypedArray(), 101)
+                  }
+              }
+
+              override fun onDestroy() {
+                  super.onDestroy()
+                  stopFeed()
+              }
+          }
+          EOF
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Build Debug APK
+        run: gradle assembleDebug
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PixooTrains-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
+          
