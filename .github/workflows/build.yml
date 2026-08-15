@@ -42,7 +42,7 @@ jobs:
           # 2. root build.gradle.kts
           cat << 'EOF' > build.gradle.kts
           plugins {
-              id("com.android.application") version "8.4.0" apply false
+              id("com.android.application") version "8.3.2" apply false
               id("org.jetbrains.kotlin.android") version "1.9.23" apply false
           }
           EOF
@@ -83,12 +83,41 @@ jobs:
           dependencies {
               implementation("androidx.core:core-ktx:1.13.1")
               implementation("androidx.appcompat:appcompat:1.6.1")
-              implementation("com.google.android.material:material:1.12.0")
+              implementation("com.google.android.material:material:1.11.0")
               implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
           }
           EOF
 
-          # 4. AndroidManifest.xml
+          # 4. colors.xml & themes.xml & strings.xml
+          cat << 'EOF' > app/src/main/res/values/colors.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <color name="purple_500">#FF6200EE</color>
+              <color name="purple_700">#FF3700B3</color>
+              <color name="teal_200">#FF03DAC5</color>
+              <color name="teal_700">#FF018786</color>
+              <color name="black">#FF000000</color>
+              <color name="white">#FFFFFFFF</color>
+          </resources>
+          EOF
+
+          cat << 'EOF' > app/src/main/res/values/themes.xml
+          <resources xmlns:tools="http://schemas.android.com/tools">
+              <style name="Theme.PixooTrains" parent="Theme.MaterialComponents.DayNight.DarkActionBar">
+                  <item name="colorPrimary">@color/purple_500</item>
+                  <item name="colorPrimaryVariant">@color/purple_700</item>
+                  <item name="colorOnPrimary">@color/white</item>
+              </style>
+          </resources>
+          EOF
+
+          cat << 'EOF' > app/src/main/res/values/strings.xml
+          <resources>
+              <string name="app_name">Pixoo Trains</string>
+          </resources>
+          EOF
+
+          # 5. AndroidManifest.xml
           cat << 'EOF' > app/src/main/AndroidManifest.xml
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -100,8 +129,8 @@ jobs:
 
               <application
                   android:allowBackup="true"
-                  android:label="Pixoo Trains"
-                  android:theme="@style/Theme.MaterialComponents.DayNight.DarkActionBar">
+                  android:label="@string/app_name"
+                  android:theme="@style/Theme.PixooTrains">
                   <activity
                       android:name=".MainActivity"
                       android:exported="true">
@@ -114,7 +143,7 @@ jobs:
           </manifest>
           EOF
 
-          # 5. activity_main.xml
+          # 6. activity_main.xml
           cat << 'EOF' > app/src/main/res/layout/activity_main.xml
           <?xml version="1.0" encoding="utf-8"?>
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -165,7 +194,7 @@ jobs:
           </LinearLayout>
           EOF
 
-          # 6. DivoomManager.kt
+          # 7. DivoomManager.kt
           cat << 'EOF' > app/src/main/java/com/example/pixootrains/DivoomManager.kt
           package com.example.pixootrains
 
@@ -243,7 +272,7 @@ jobs:
           }
           EOF
 
-          # 7. FrameRenderer.kt
+          # 8. FrameRenderer.kt
           cat << 'EOF' > app/src/main/java/com/example/pixootrains/FrameRenderer.kt
           package com.example.pixootrains
 
@@ -313,7 +342,7 @@ jobs:
           }
           EOF
 
-          # 8. MainActivity.kt
+          # 9. MainActivity.kt
           cat << 'EOF' > app/src/main/java/com/example/pixootrains/MainActivity.kt
           package com.example.pixootrains
 
